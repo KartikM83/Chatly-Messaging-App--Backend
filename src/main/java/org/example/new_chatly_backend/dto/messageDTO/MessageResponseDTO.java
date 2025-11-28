@@ -1,6 +1,7 @@
 package org.example.new_chatly_backend.dto.messageDTO;
 
 import lombok.*;
+import org.example.new_chatly_backend.entity.messageEntity.MessageStatus;
 import org.example.new_chatly_backend.entity.messageEntity.MessageType;
 
 import java.awt.*;
@@ -20,5 +21,5 @@ public class MessageResponseDTO {
     private MessageType type;
     private String content;
     private Instant timestamp;
-    private String status;
+    private MessageStatus status;
 }

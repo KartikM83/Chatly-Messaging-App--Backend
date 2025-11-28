@@ -56,8 +56,8 @@ public class MessageEntity {
     @Column(name = "client_message_id")
     private String clientMessageId;
 
-    @Column(nullable = false)
-    private String status = "sent";
+    @Enumerated(EnumType.STRING)
+    private MessageStatus status = MessageStatus.SENT;
 
     private Instant deliveredAt;
     private Instant readAt;

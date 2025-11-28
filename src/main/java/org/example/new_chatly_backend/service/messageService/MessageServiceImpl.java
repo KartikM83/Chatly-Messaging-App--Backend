@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.example.new_chatly_backend.dto.messageDTO.*;
 import org.example.new_chatly_backend.entity.conversationEntity.ConversationEntity;
 import org.example.new_chatly_backend.entity.messageEntity.MessageEntity;
+import org.example.new_chatly_backend.entity.messageEntity.MessageStatus;
 import org.example.new_chatly_backend.entity.messageEntity.MessageType;
 import org.example.new_chatly_backend.entity.userEntity.UserEntity;
 import org.example.new_chatly_backend.exception.UserNotFoundException;
@@ -49,7 +50,7 @@ public class MessageServiceImpl implements MessageService {
                 .type(request.getType() != null ? request.getType() : MessageType.TEXT)
                 .clientMessageId(request.getClientMessageId())
                 .createdAt(Instant.now())
-                .status("sent")
+                .status(MessageStatus.SENT)
                 .build();
 
         MessageEntity saved = messageRepository.save(m);
@@ -62,7 +63,7 @@ public class MessageServiceImpl implements MessageService {
                 .type(request.getType())
                 .content(request.getContent())
                 .timestamp(saved.getCreatedAt())
-                .status("sent")
+                .status(MessageStatus.SENT)
                 .build();
 
         // ✅ send real-time update via WebSocket
@@ -77,7 +78,7 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     public MessageAckResponseDTO acknowledgeMessage(String conversationId, MessageAckRequestDTO request, Principal principal) {
-        var message = messageRepository.findById(request.getMessageId())
+        MessageEntity message = messageRepository.findById(request.getMessageId())
                 .orElseThrow(() -> new UserNotFoundException("Message not found"));
 
         if (!message.getConversation().getId().equals(conversationId)) {
@@ -85,48 +86,47 @@ public class MessageServiceImpl implements MessageService {
         }
 
         if (request.getStatus().equalsIgnoreCase("delivered")) {
-            message.setStatus("delivered");
+            message.setStatus(MessageStatus.DELIVERED);
             message.setDeliveredAt(request.getDeliveredAt() != null ? request.getDeliveredAt() : Instant.now());
         } else if (request.getStatus().equalsIgnoreCase("read")) {
-            message.setStatus("read");
+            message.setStatus(MessageStatus.SEEN);
             message.setReadAt(request.getReadAt() != null ? request.getReadAt() : Instant.now());
         }
 
         MessageEntity updated = messageRepository.save(message);
 
-        // 🔔 Notify via WebSocket
-        String topic = "/topic/conversations/" + updated.getConversation().getId();
-        messagingTemplate.convertAndSend(topic, MessageAckResponseDTO.builder()
-                .messageId(updated.getId())
-                .status(updated.getStatus())
-                .build());
-
-        return MessageAckResponseDTO.builder()
+        MessageAckResponseDTO response = MessageAckResponseDTO.builder()
                 .messageId(updated.getId())
                 .status(updated.getStatus())
                 .build();
+
+        // 🔔 Notify via WebSocket
+        messagingTemplate.convertAndSend("/topic/conversations/" + conversationId, response);
+
+        return response;
     }
 
     @Override
     public MessageReadResponseDTO markMessagesAsRead(String conversationId, MessageReadRequestDTO request, Principal principal) {
         int updatedCount = 0;
+        String userId = principal.getName();
 
         for (String messageId : request.getMessageIds()) {
-            var message = messageRepository.findById(messageId)
+            MessageEntity  message = messageRepository.findById(messageId)
                     .orElse(null);
-
-            if (message != null && !"read".equalsIgnoreCase(message.getStatus())) {
-                message.setStatus("read");
-                message.setReadAt(request.getReadAt() != null ? request.getReadAt() : Instant.now());
+            if (message == null) continue;
+            if (!message.getSender().getId().equals(userId)) { // don’t mark my own msg as read
+                message.getReadBy().add(userRepo.findById(userId).orElseThrow());
+                message.setStatus(MessageStatus.SEEN);
+                message.setReadAt(Instant.now());
                 messageRepository.save(message);
                 updatedCount++;
 
-                // 🔔 Broadcast update for each message
                 messagingTemplate.convertAndSend(
                         "/topic/conversations/" + conversationId,
                         MessageAckResponseDTO.builder()
                                 .messageId(message.getId())
-                                .status("read")
+                                .status(MessageStatus.SEEN)
                                 .build()
                 );
             }
@@ -299,6 +299,43 @@ public class MessageServiceImpl implements MessageService {
 
         return resultMap;
     }
+
+    public void markAllAsDeliveredForUser(Principal principal) {
+        String userId = principal.getName();
+
+        List<MessageEntity> pending = messageRepository.findPendingForUser(userId);
+        if (pending.isEmpty()) {
+            return;
+        }
+
+        Instant now = Instant.now();
+
+        for (MessageEntity m : pending) {
+            // Only update if still SENT (avoid downgrading SEEN etc.)
+            if (m.getStatus() == MessageStatus.SENT) {
+                m.setStatus(MessageStatus.DELIVERED);
+                if (m.getDeliveredAt() == null) {
+                    m.setDeliveredAt(now);
+                }
+            }
+        }
+
+        messageRepository.saveAll(pending);
+
+        // 🔔 For each updated message, broadcast an ACK to that conversation
+        for (MessageEntity m : pending) {
+            MessageAckResponseDTO ack = MessageAckResponseDTO.builder()
+                    .messageId(m.getId())
+                    .status(m.getStatus()) // DELIVERED
+                    .build();
+
+            messagingTemplate.convertAndSend(
+                    "/topic/conversations/" + m.getConversation().getId(),
+                    ack
+            );
+        }
+    }
+
 
 
 

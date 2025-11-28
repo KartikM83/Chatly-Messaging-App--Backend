@@ -33,4 +33,15 @@ public interface MessageRepository extends JpaRepository<MessageEntity, String> 
     long countUnreadMessages(@Param("conversationId") String conversationId, @Param("userId") String userId);
 
     long countByConversationId(String conversationId);
+
+    @Query("""
+   SELECT m FROM MessageEntity m
+   JOIN m.conversation c
+   JOIN c.participants p
+   WHERE p.user.id = :userId
+     AND m.sender.id <> :userId
+     AND m.status = 'SENT'
+""")
+    List<MessageEntity> findPendingForUser(@Param("userId") String userId);
+
 }
