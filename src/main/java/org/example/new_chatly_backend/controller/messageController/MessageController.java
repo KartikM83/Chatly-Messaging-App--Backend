@@ -92,6 +92,13 @@ public class MessageController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/messages/sync-delivered")
+    public ResponseEntity<Void> syncDelivered(Principal principal) {
+        messageService.markAllAsDeliveredForUser(principal);
+        return ResponseEntity.ok().build();
+    }
+
+
 
 
 
