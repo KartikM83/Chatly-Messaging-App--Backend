@@ -29,8 +29,21 @@ public interface MessageRepository extends JpaRepository<MessageEntity, String> 
             org.springframework.data.domain.Pageable pageable
     );
 
-    @Query("SELECT COUNT(m) FROM MessageEntity m WHERE m.conversation.id = :conversationId AND m.status <> 'read' AND m.sender.id <> :userId")
-    long countUnreadMessages(@Param("conversationId") String conversationId, @Param("userId") String userId);
+//    @Query("SELECT COUNT(m) FROM MessageEntity m WHERE m.conversation.id = :conversationId AND m.status <> 'SEEN' AND m.sender.id <> :userId")
+//    long countUnreadMessages(@Param("conversationId") String conversationId, @Param("userId") String userId);
+
+    @Query("""
+SELECT COUNT(m)
+FROM MessageEntity m
+WHERE m.conversation.id = :conversationId
+  AND m.sender.id <> :userId
+  AND :userId NOT IN (
+      SELECT u.id FROM m.readBy u
+  )
+""")
+    long countUnreadMessages(@Param("conversationId") String conversationId,
+                             @Param("userId") String userId);
+
 
     long countByConversationId(String conversationId);
 

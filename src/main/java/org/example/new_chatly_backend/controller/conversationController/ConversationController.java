@@ -28,12 +28,34 @@ public class ConversationController {
 
 
 
-    @PostMapping
-    public ResponseEntity<ConversationResponseDTO> createConversation(
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ConversationResponseDTO> createConversationJson(
             @RequestBody CreateConversationRequest request,
-            HttpServletRequest servletRequest){
+            HttpServletRequest servletRequest) {
 
-        ConversationResponseDTO response = conversationService.createConversation(request,servletRequest);
+        ConversationResponseDTO response =
+                conversationService.createConversation(request, null, servletRequest);
+        return ResponseEntity.ok(response);
+    }
+
+
+
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ConversationResponseDTO> createConversationMultipart(
+            @RequestPart("data") String dataJson,
+            @RequestPart(value = "file", required = false) MultipartFile file,
+            HttpServletRequest servletRequest) {
+
+        CreateConversationRequest request;
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            request = mapper.readValue(dataJson, CreateConversationRequest.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid JSON in 'data' part: " + e.getMessage(), e);
+        }
+
+        ConversationResponseDTO response =
+                conversationService.createConversation(request, file, servletRequest);
         return ResponseEntity.ok(response);
     }
 

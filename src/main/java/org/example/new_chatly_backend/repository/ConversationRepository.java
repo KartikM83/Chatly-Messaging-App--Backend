@@ -33,8 +33,15 @@ public interface ConversationRepository extends JpaRepository<ConversationEntity
     @Query("SELECT c FROM ConversationEntity c WHERE c.type='GROUP' AND c.name = :groupName")
     List<ConversationEntity> findGroupByName(String groupName);
 
-    @Query("SELECT DISTINCT c FROM ConversationEntity c JOIN c.participants p WHERE p.user.id = :userId")
+    @Query("""
+    SELECT c 
+    FROM ConversationEntity c
+    JOIN c.participants p
+    WHERE p.user.id = :userId
+      AND p.deletedForUser = false
+""")
     List<ConversationEntity> findByParticipantId(@Param("userId") String userId);
+
 
 
 }

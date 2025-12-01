@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.example.new_chatly_backend.entity.userEntity.UserEntity;
 
+import java.time.Instant;
+
 @Entity
 @Getter
 @Setter
@@ -26,5 +28,9 @@ public class ConversationParticipantEntity {
     @JoinColumn(name = "user_id")
     private UserEntity user;
 
-    private boolean archived = false;
+    private boolean isPinned =false;
+    private boolean isTyping =false;
+    private boolean archived =false;
+    private boolean deletedForUser = false;
+    private Instant deletedAt;
 }

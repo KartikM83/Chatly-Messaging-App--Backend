@@ -3,14 +3,17 @@ package org.example.new_chatly_backend.service.messageService;
 import lombok.RequiredArgsConstructor;
 import org.example.new_chatly_backend.dto.messageDTO.*;
 import org.example.new_chatly_backend.entity.conversationEntity.ConversationEntity;
+import org.example.new_chatly_backend.entity.conversationEntity.ConversationParticipantEntity;
 import org.example.new_chatly_backend.entity.messageEntity.MessageEntity;
 import org.example.new_chatly_backend.entity.messageEntity.MessageStatus;
 import org.example.new_chatly_backend.entity.messageEntity.MessageType;
 import org.example.new_chatly_backend.entity.userEntity.UserEntity;
 import org.example.new_chatly_backend.exception.UserNotFoundException;
+import org.example.new_chatly_backend.repository.ConversationParticipantRepository;
 import org.example.new_chatly_backend.repository.ConversationRepository;
 import org.example.new_chatly_backend.repository.MessageRepository;
 import org.example.new_chatly_backend.repository.UserRepository;
+import org.example.new_chatly_backend.service.conversationService.ConversationServiceImpl;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +29,8 @@ public class MessageServiceImpl implements MessageService {
     private final UserRepository userRepo;
     private final MessageRepository messageRepository;
     private final SimpMessagingTemplate messagingTemplate; // ✅ inject this
+    private final ConversationParticipantRepository participantRepository;
+    private final ConversationServiceImpl conversationService;
 
     @Override
     public MessageResponseDTO sendMessage(String conversationId, Principal principal, MessageRequestDTO request) {
@@ -54,6 +59,16 @@ public class MessageServiceImpl implements MessageService {
                 .build();
 
         MessageEntity saved = messageRepository.save(m);
+
+        conversation.getParticipants().forEach(cp -> {
+            if (cp.isDeletedForUser()) {
+                cp.setDeletedForUser(false);
+//                cp.setDeletedAt(null);
+            }
+        });
+        participantRepository.saveAll(conversation.getParticipants());
+
+        conversationService.broadcastConversationToParticipants(conversation);
 
         MessageResponseDTO response = MessageResponseDTO.builder()
                 .id(saved.getId())
@@ -131,6 +146,11 @@ public class MessageServiceImpl implements MessageService {
                 );
             }
         }
+
+        ConversationEntity conversation = conversationRepo.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+
+        conversationService.broadcastConversationToParticipants(conversation);
 
         return MessageReadResponseDTO.builder()
                 .markedRead(updatedCount)
@@ -241,9 +261,18 @@ public class MessageServiceImpl implements MessageService {
 
 
     @Override
-    public Map<String, Object> getMessages(String conversationId, int limit, String before) {
+    public Map<String, Object> getMessages(String conversationId, int limit, String before , Principal principal) {
+
+        String userId = principal.getName();
         ConversationEntity conversation = conversationRepo.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation not found"));
+
+        ConversationParticipantEntity cp = conversation.getParticipants().stream()
+                .filter(p -> p.getUser().getId().equals(userId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("User not part of this conversation"));
+
+
 
         List<MessageEntity> messages;
 
@@ -299,6 +328,9 @@ public class MessageServiceImpl implements MessageService {
 
         return resultMap;
     }
+
+
+
 
     public void markAllAsDeliveredForUser(Principal principal) {
         String userId = principal.getName();

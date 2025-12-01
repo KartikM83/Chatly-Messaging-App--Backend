@@ -20,6 +20,7 @@ import org.example.new_chatly_backend.repository.MessageRepository;
 import org.example.new_chatly_backend.repository.UserRepository;
 import org.example.new_chatly_backend.utility.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -38,6 +39,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationParticipantRepository participantRepository;
     private final MessageRepository messageRepo;
     private final FileStorageService fileStorageService;
+    private final SimpMessagingTemplate messagingTemplate;
 
 
     @Override
@@ -56,16 +58,14 @@ public class ConversationServiceImpl implements ConversationService {
 
             if (existing.isPresent()) {
                 ConversationEntity existingConversation = existing.get();
-                return mapToConversationResponseDTO(existingConversation);
+                return mapToConversationResponseDTO(existingConversation,currentUserId);
             }
 
             ConversationEntity conversation = new ConversationEntity();
             conversation.setType(ConversationType.DIRECT);
             conversation.setCreatedAt(Instant.now());
             conversation.setAdmin(currentUser.getId());
-            conversation.setArchived(false);
-            conversation.setPinned(false);
-            conversation.setTyping(false);
+
 
             Set<ConversationParticipantEntity> participants = new HashSet<>();
 
@@ -83,8 +83,9 @@ public class ConversationServiceImpl implements ConversationService {
 
             conversation.setParticipants(participants);
 
+
             ConversationEntity savedConversation = conversationRepo.save(conversation);
-            return mapToConversationResponseDTO(savedConversation);
+            return mapToConversationResponseDTO(savedConversation,currentUserId);
 
 
         } else if (ConversationType.GROUP.equals(request.getType())) {
@@ -102,7 +103,7 @@ public class ConversationServiceImpl implements ConversationService {
 
                 // ✅ Check for identical members
                 if (existingMemberIds.equals(requestedMemberIds)) {
-                    return mapToConversationResponseDTO(existingGroup);
+                    return mapToConversationResponseDTO(existingGroup,currentUserId);
                 }
             }
 
@@ -136,12 +137,129 @@ public class ConversationServiceImpl implements ConversationService {
 
             ConversationEntity saved = conversationRepo.save(conversation);
 
-            return mapToConversationResponseDTO(saved);
+            return mapToConversationResponseDTO(saved,currentUserId);
         }
 
         // ❌ Invalid Type
         throw new RuntimeException("Invalid conversation type: " + request.getType());
     }
+
+    public ConversationResponseDTO createConversation(CreateConversationRequest request,
+                                                      MultipartFile file,
+                                                      HttpServletRequest servletRequest) {
+
+        String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
+        UserEntity currentUser = userRepo.findById(currentUserId)
+                .orElseThrow(() -> new UserNotFoundException("Current user not found"));
+
+        // base URL for uploads (same as update)
+        String baseUrl = servletRequest.getScheme() + "://" +
+                servletRequest.getServerName() + ":" +
+                servletRequest.getServerPort();
+
+        if (ConversationType.DIRECT.equals(request.getType())) {
+            // === DIRECT CHAT LOGIC (unchanged) ===
+            UserEntity participant = userRepo.findById(request.getParticipantId())
+                    .orElseThrow(() -> new UserNotFoundException("Participant not found"));
+
+            Optional<ConversationEntity> existing =
+                    conversationRepo.findDirectConversationBetweenUsers(currentUserId, participant.getId());
+
+            if (existing.isPresent()) {
+                ConversationEntity existingConversation = existing.get();
+
+                // ✅ Notify both users that this conversation exists / was reopened
+                broadcastConversationToParticipants(existingConversation);
+                return mapToConversationResponseDTO(existingConversation,currentUserId);
+            }
+
+            ConversationEntity conversation = new ConversationEntity();
+            conversation.setType(ConversationType.DIRECT);
+            conversation.setCreatedAt(Instant.now());
+            conversation.setAdmin(currentUser.getId());
+
+
+            Set<ConversationParticipantEntity> participants = new HashSet<>();
+
+            ConversationParticipantEntity cp1 = ConversationParticipantEntity.builder()
+                    .user(currentUser)
+                    .build();
+            cp1.setConversation(conversation);
+            participants.add(cp1);
+
+            ConversationParticipantEntity cp2 = ConversationParticipantEntity.builder()
+                    .user(participant)
+                    .build();
+            cp2.setConversation(conversation);
+            participants.add(cp2);
+
+            conversation.setParticipants(participants);
+
+            ConversationEntity savedConversation = conversationRepo.save(conversation);
+            broadcastConversationToParticipants(savedConversation);
+            return mapToConversationResponseDTO(savedConversation,currentUserId);
+
+        } else if (ConversationType.GROUP.equals(request.getType())) {
+
+            // === GROUP CHAT LOGIC ===
+            Set<String> requestedMemberIds = new HashSet<>(request.getMemberIds());
+            requestedMemberIds.add(currentUserId);
+
+            List<ConversationEntity> sameNameGroups =
+                    conversationRepo.findGroupByNameAndAdminId(request.getName(), currentUserId);
+
+            for (ConversationEntity existingGroup : sameNameGroups) {
+                Set<String> existingMemberIds = existingGroup.getParticipants().stream()
+                        .map(cp -> cp.getUser().getId())
+                        .collect(Collectors.toSet());
+
+                if (existingMemberIds.equals(requestedMemberIds)) {
+                    broadcastConversationToParticipants(existingGroup);
+                    return mapToConversationResponseDTO(existingGroup,currentUserId);
+                }
+            }
+
+            ConversationEntity conversation = new ConversationEntity();
+            conversation.setType(ConversationType.GROUP);
+            conversation.setName(request.getName());
+            conversation.setAdmin(currentUserId);
+            conversation.setCreatedAt(Instant.now());
+
+            // ✅ group profile image:
+            // 1) if file uploaded → upload & use URL
+            // 2) else fall back to request.getGroupProfileImage()
+            if (file != null && !file.isEmpty()) {
+                String imageUrl = fileStorageService.upload(file, baseUrl);
+                conversation.setProfileImage(imageUrl);
+            } else if (request.getGroupProfileImage() != null) {
+                conversation.setProfileImage(request.getGroupProfileImage());
+            }
+
+            Set<ConversationParticipantEntity> participants = new HashSet<>();
+            for (String memberId : requestedMemberIds) {
+                UserEntity member = userRepo.findById(memberId)
+                        .orElseThrow(() -> new RuntimeException("User not found: " + memberId));
+                ConversationParticipantEntity participant = ConversationParticipantEntity.builder()
+                        .conversation(conversation)
+                        .user(member)
+                        .build();
+                participants.add(participant);
+            }
+            conversation.setParticipants(participants);
+
+            ConversationEntity saved = conversationRepo.save(conversation);
+            broadcastConversationToParticipants(saved);
+            return mapToConversationResponseDTO(saved,currentUserId);
+        }
+
+        throw new RuntimeException("Invalid conversation type: " + request.getType());
+    }
+
+
+
+
+
+
 
     @Override
     public ConversationResponseDTO getConversationById(String conversationId, HttpServletRequest servletRequest) {
@@ -157,13 +275,14 @@ public class ConversationServiceImpl implements ConversationService {
             throw new RuntimeException("Access denied: You are not part of this conversation");
         }
 
-        return mapToConversationResponseDTO(conversation);
+        return mapToConversationResponseDTO(conversation,currentUserId);
     }
 
     @Override
     public ArchivedResponseDTO archiveConversation(String conversationId, HttpServletRequest servletRequest) {
         String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
         UserEntity currentUser = userRepo.findById(currentUserId).orElseThrow(()->new UserNotFoundException("Current user not found"));
+        System.out.println("Current user"+currentUserId);
 
         ConversationParticipantEntity participant = participantRepository.findByConversation_IdAndUser_Id(conversationId, currentUserId)
                 .orElseThrow(() -> new RuntimeException("Access denied: You are not part of this conversation"));
@@ -172,7 +291,7 @@ public class ConversationServiceImpl implements ConversationService {
         participantRepository.save(participant);
 
         return ArchivedResponseDTO.builder()
-                .conversationId(participant.getId())
+                .conversationId(conversationId)
                 .archived(participant.isArchived())
                 .build();
 
@@ -192,7 +311,7 @@ public class ConversationServiceImpl implements ConversationService {
         participantRepository.save(participant);
 
         return ArchivedResponseDTO.builder()
-                .conversationId(participant.getId())
+                .conversationId(conversationId)
                 .archived(participant.isArchived())
                 .build();
     }
@@ -200,54 +319,49 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public String deleteConversation(String conversationId, HttpServletRequest servletRequest) {
         String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
-        UserEntity currentUser = userRepo.findById(currentUserId).orElseThrow(()->new UserNotFoundException("Current user not found"));
+        UserEntity currentUser = userRepo.findById(currentUserId)
+                .orElseThrow(() -> new UserNotFoundException("Current user not found"));
 
-        ConversationParticipantEntity participant = participantRepository.findByConversation_IdAndUser_Id(conversationId, currentUserId)
+        ConversationParticipantEntity participant = participantRepository
+                .findByConversation_IdAndUser_Id(conversationId, currentUserId)
                 .orElseThrow(() -> new RuntimeException("Access denied: You are not part of this conversation"));
 
-        participantRepository.delete(participant);
+        // ❌ NO: participantRepository.delete(participant);
 
-        return "Conversation is deleted";
+        // ✅ Soft delete / hide for user
+        participant.setDeletedForUser(true);
+        participant.setDeletedAt(Instant.now());
+        participantRepository.save(participant);
+
+        return "Conversation hidden for user";
     }
+
+
+
+
 
     @Override
     public List<ConversationResponseDTO> getUserConversations(String userId) {
+        // 1) Get all conversations where this user is a participant
         List<ConversationEntity> conversations = conversationRepo.findByParticipantId(userId);
 
-        return conversations.stream().map(conversation -> {
-            // ✅ Fetch last message safely using Pageable
-            List<MessageEntity> lastMessages = messageRepo
-                    .findTopByConversationIdOrderByCreatedAtDesc(conversation.getId(), org.springframework.data.domain.PageRequest.of(0, 1));
+        // 2) Map to DTOs (this already sets lastMessage, lastMessageAt, unreadCount)
+        List<ConversationResponseDTO> dtos = conversations.stream()
+                .map(conversation -> mapToConversationResponseDTO(conversation, userId))
+                .collect(Collectors.toList());
 
-            Optional<MessageEntity> lastMessageOpt = lastMessages.isEmpty() ? Optional.empty() : Optional.of(lastMessages.get(0));
+        // 3) Sort by last activity: lastMessageAt (if exists) else createdAt
+        dtos.sort(
+                Comparator.comparing(
+                        (ConversationResponseDTO c) ->
+                                c.getLastMessageAt() != null ? c.getLastMessageAt() : c.getCreatedAt()
+                ).reversed() // newest first
+        );
 
-            // ✅ Unread count
-            long unreadCount = messageRepo.countUnreadMessages(conversation.getId(), userId);
-
-            // ✅ Convert participant entities to DTOs
-            List<ParticipantResponseDTO> participants = conversation.getParticipants().stream()
-                    .map(p -> ParticipantResponseDTO.builder()
-                            .id(p.getUser().getId())
-                            .name(p.getUser().getName())
-                            .profileImage(p.getUser().getProfileImage())
-                            .build())
-                    .toList();
-
-            return ConversationResponseDTO.builder()
-                    .id(conversation.getId())
-                    .type(conversation.getType())
-                    .groupName(conversation.getName())
-                    .participants(participants)
-                    .adminId(conversation.getAdmin())
-                    .createdAt(conversation.getCreatedAt())
-                    .groupProfileImage(conversation.getProfileImage())
-                    // ✅ Add recent message info
-                    .lastMessage(lastMessageOpt.map(MessageEntity::getContent).orElse(null))
-                    .lastMessageAt(lastMessageOpt.map(MessageEntity::getCreatedAt).orElse(null))
-                    .unreadCount(unreadCount)
-                    .build();
-        }).collect(Collectors.toList());
+        return dtos;
     }
+
+
 
     @Override
     public ConversationResponseDTO updateConversation(CreateConversationRequest request,
@@ -258,32 +372,29 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationEntity conversation = conversationRepo.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("conversation not found"));
 
-        // Update ONLY provided fields
+        // ensure non-null request object
+        if (request == null) {
+            request = new CreateConversationRequest();
+        }
+
         if (request.getName() != null) {
             conversation.setName(request.getName());
         }
 
-        if (request.getArchived() != null) {
-            conversation.setArchived(request.getArchived());
-        }
 
-        if (request.getPinned() != null) {
-            conversation.setPinned(request.getPinned());
-        }
 
-        // Base URL for file upload
         String baseUrl = servletRequest.getScheme() + "://" +
                 servletRequest.getServerName() + ":" +
                 servletRequest.getServerPort();
 
-        // Handle profile image update
         if (file != null && !file.isEmpty()) {
             String imageUrl = fileStorageService.upload(file, baseUrl);
             conversation.setProfileImage(imageUrl);
         }
 
+        String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
         conversationRepo.save(conversation);
-        return mapToConversationResponseDTO(conversation);
+        return mapToConversationResponseDTO(conversation,currentUserId);
     }
 
 
@@ -293,29 +404,70 @@ public class ConversationServiceImpl implements ConversationService {
 
 
 
-    private ConversationResponseDTO mapToConversationResponseDTO(ConversationEntity conversation) {
+
+    private ConversationResponseDTO mapToConversationResponseDTO(ConversationEntity conversation,
+                                                                 String currentUserId) {
+
         List<ParticipantResponseDTO> participantDTOs = conversation.getParticipants()
                 .stream()
                 .map(cp -> ParticipantResponseDTO.builder()
                         .id(cp.getUser().getId())
                         .name(cp.getUser().getName())
-                        .profileImage(cp.getUser().getProfileImage())// may be null if user name not set
+                        .profileImage(cp.getUser().getProfileImage())
                         .build())
                 .toList();
 
+        // find THIS user's participant row
+        Optional<ConversationParticipantEntity> meOpt = conversation.getParticipants()
+                .stream()
+                .filter(cp -> cp.getUser().getId().equals(currentUserId))
+                .findFirst();
+
+        boolean archivedForMe = meOpt.map(ConversationParticipantEntity::isArchived).orElse(false);
+        boolean pinnedForMe   = meOpt.map(ConversationParticipantEntity::isPinned).orElse(false);
+        long unreadCount = messageRepo.countUnreadMessages(conversation.getId(), currentUserId);
+
+        // 🔹 last message
+        List<MessageEntity> lastMessages = messageRepo
+                .findTopByConversationIdOrderByCreatedAtDesc(
+                        conversation.getId(),
+                        org.springframework.data.domain.PageRequest.of(0, 1)
+                );
+
+        Optional<MessageEntity> lastMessageOpt =
+                lastMessages.isEmpty() ? Optional.empty() : Optional.of(lastMessages.get(0));
+
         return ConversationResponseDTO.builder()
                 .id(conversation.getId())
-                .type(conversation.getType()) // e.g., "direct"
+                .type(conversation.getType())
                 .groupName(conversation.getName())
                 .participants(participantDTOs)
                 .adminId(conversation.getAdmin())
                 .groupProfileImage(conversation.getProfileImage())
                 .createdAt(conversation.getCreatedAt())
-                .archived(conversation.isArchived())
-                .pinned(conversation.isPinned())
-                .typing(conversation.isTyping())
+                .archived(archivedForMe)   // 👈 per user
+                .pinned(pinnedForMe)
+                .lastMessage(lastMessageOpt.map(MessageEntity::getContent).orElse(null))
+                .lastMessageAt(lastMessageOpt.map(MessageEntity::getCreatedAt).orElse(null))
+                .unreadCount(unreadCount)
+                .typing(false)             // or null; typing should be via websocket
                 .build();
     }
+
+
+    public void broadcastConversationToParticipants(ConversationEntity conversation) {
+
+
+        // Send to each participant's personal topic
+        conversation.getParticipants().forEach(cp -> {
+            String userId = cp.getUser().getId();
+            ConversationResponseDTO dto = mapToConversationResponseDTO(conversation, userId);
+            String destination = "/topic/users/" + userId + "/conversations";
+            System.out.println("🔔 Broadcasting conversation " + dto.getId() + " to " + destination);
+            messagingTemplate.convertAndSend(destination, dto);
+        });
+    }
+
 
 }
 
