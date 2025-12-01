@@ -18,7 +18,7 @@ public interface MessageService {
 
     Object reactToMessage(String conversationId, String messageId, String reaction, Principal principal);
 
-    Map<String, Object> getMessages(String conversationId, int limit, String before);
+    Map<String, Object> getMessages(String conversationId, int limit, String before ,Principal principal);
 
     void markAllAsDeliveredForUser(Principal principal);
 }

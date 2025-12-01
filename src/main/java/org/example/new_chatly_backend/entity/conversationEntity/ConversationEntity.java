@@ -31,9 +31,7 @@ public class ConversationEntity {
 
     private Instant createdAt;
 
-    private boolean isPinned;
-    private boolean isTyping;
-    private boolean archived;
+
 
 
     // Participants mapping

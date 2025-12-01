@@ -23,9 +23,10 @@ public class MessageController {
     public ResponseEntity<Map<String, Object>> getMessages(
             @PathVariable String conversationId,
             @RequestParam(defaultValue = "50") int limit,
-            @RequestParam(required = false) String before
+            @RequestParam(required = false) String before,
+            Principal principal
     ) {
-        Map<String, Object> response = messageService.getMessages(conversationId, limit, before);
+        Map<String, Object> response = messageService.getMessages(conversationId, limit, before,principal);
         return ResponseEntity.ok(response);
     }
 
