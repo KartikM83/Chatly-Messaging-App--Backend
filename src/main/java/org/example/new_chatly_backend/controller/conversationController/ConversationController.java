@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.example.new_chatly_backend.dto.conversationDTO.ArchivedResponseDTO;
 import org.example.new_chatly_backend.dto.conversationDTO.ConversationResponseDTO;
 import org.example.new_chatly_backend.dto.conversationDTO.CreateConversationRequest;
+import org.example.new_chatly_backend.dto.conversationDTO.PinnedResponseDTO;
 import org.example.new_chatly_backend.service.conversationService.ConversationServiceImpl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -94,6 +95,19 @@ public class ConversationController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/{conversationId}/pinned")
+    public ResponseEntity<PinnedResponseDTO> pinConversation(@PathVariable String conversationId, HttpServletRequest servletRequest){
+        PinnedResponseDTO response =conversationService.pinConversation(conversationId,servletRequest);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{conversationId}/unpinned")
+    public ResponseEntity<PinnedResponseDTO> unpinConversation(@PathVariable String conversationId, HttpServletRequest servletRequest){
+        PinnedResponseDTO response =conversationService.unpinConversation(conversationId,servletRequest);
+        return ResponseEntity.ok(response);
+    }
+
+
     @PostMapping("/{conversationId}/unarchive")
     public ResponseEntity<ArchivedResponseDTO> unarchiveConversation(@PathVariable String conversationId, HttpServletRequest servletRequest){
         ArchivedResponseDTO response =conversationService.unarchiveConversation(conversationId,servletRequest);
@@ -105,4 +119,14 @@ public class ConversationController {
         String response =conversationService.deleteConversation(conversationId,servletRequest);
         return ResponseEntity.ok(response);
     }
+
+    @PostMapping("/{conversationId}/leave")
+    public ResponseEntity<String> leaveGroup(
+            @PathVariable String conversationId,
+            HttpServletRequest servletRequest
+    ) {
+        String response = conversationService.leaveGroup(conversationId, servletRequest);
+        return ResponseEntity.ok(response);
+    }
+
 }

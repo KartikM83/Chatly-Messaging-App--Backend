@@ -12,4 +12,5 @@ public class ParticipantResponseDTO {
     private String id;
     private String name;
     private String profileImage;
+    private String phoneNumber;
 }

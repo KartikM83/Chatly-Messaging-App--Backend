@@ -6,6 +6,7 @@ import org.example.new_chatly_backend.entity.messageEntity.MessageType;
 
 import java.awt.*;
 import java.time.Instant;
+import java.util.Map;
 
 @Getter
 @Setter
@@ -22,4 +23,6 @@ public class MessageResponseDTO {
     private String content;
     private Instant timestamp;
     private MessageStatus status;
+
+    private Map<String, String> reactions;
 }

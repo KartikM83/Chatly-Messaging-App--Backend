@@ -5,8 +5,10 @@ import lombok.RequiredArgsConstructor;
 import org.example.new_chatly_backend.dto.messageDTO.*;
 import org.example.new_chatly_backend.service.messageService.MessageService;
 import org.example.new_chatly_backend.service.messageService.MessageServiceImpl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.security.Principal;
 import java.util.Map;
@@ -37,6 +39,30 @@ public class MessageController {
         MessageResponseDTO response =messageService.sendMessage(conversationId,principal,request);
         return ResponseEntity.ok(response);
 
+    }
+
+
+
+    @PostMapping( value = "/{conversationId}/messages/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<MessageResponseDTO> sendMediaMessage(
+            @PathVariable String conversationId,
+            @RequestPart("file") MultipartFile file,
+            @RequestPart(value = "type", required = false) String type,
+            @RequestPart(value = "content", required = false) String caption,
+            @RequestPart(value = "clientMessageId", required = false) String clientMessageId,
+            Principal principal,
+            HttpServletRequest request
+    ) {
+        MessageResponseDTO dto = messageService.sendMediaMessage(
+                conversationId,
+                principal,
+                file,
+                type,
+                clientMessageId,
+                request,
+                caption
+        );
+        return ResponseEntity.ok(dto);
     }
 
     @PostMapping("/{conversationId}/messages/ack")
@@ -74,11 +100,13 @@ public class MessageController {
     public ResponseEntity<?> deleteMessage(
             @PathVariable String conversationId,
             @PathVariable String messageId,
+            @RequestParam(defaultValue = "ME") String scope, // 👈 new
             Principal principal
     ) {
-        var response = messageService.deleteMessage(conversationId, messageId, principal);
+        var response = messageService.deleteMessage(conversationId, messageId, scope, principal);
         return ResponseEntity.ok(response);
     }
+
 
     @PostMapping("/{conversationId}/messages/react")
     public ResponseEntity<Map<String, Object>> reactToMessage(

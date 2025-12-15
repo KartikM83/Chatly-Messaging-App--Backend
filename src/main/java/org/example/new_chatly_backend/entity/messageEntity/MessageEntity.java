@@ -26,13 +26,17 @@ public class MessageEntity {
     @Column(nullable = false, length = 2000)
     private String content;
 
+    private String caption;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private MessageType type;
 
 
+    @Builder.Default
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
+
 
 
 
@@ -45,6 +49,17 @@ public class MessageEntity {
 //    @JsonBackReference("conversation-messages")
     private ConversationEntity conversation;
 
+
+    @Builder.Default
+    @ManyToMany
+    @JoinTable(
+            name = "message_deliveries",
+            joinColumns = @JoinColumn(name = "message_id"),
+            inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    private Set<UserEntity> deliveredTo = new HashSet<>();
+
+    @Builder.Default
     @ManyToMany
     @JoinTable(
             name = "message_reads",
@@ -56,6 +71,7 @@ public class MessageEntity {
     @Column(name = "client_message_id")
     private String clientMessageId;
 
+    @Builder.Default
     @Enumerated(EnumType.STRING)
     private MessageStatus status = MessageStatus.SENT;
 
@@ -69,9 +85,20 @@ public class MessageEntity {
     private String deletedFor; // "sender" or "everyone"
     private Instant deletedAt;
 
+    @Builder.Default
     @ElementCollection
     @CollectionTable(name = "message_reactions")
     @MapKeyColumn(name = "user_id")
     @Column(name = "reaction")
     private Map<String, String> reactions = new HashMap<>();
+
+    @Builder.Default
+    @ManyToMany
+    @JoinTable(
+            name = "message_deleted_for_users",
+            joinColumns = @JoinColumn(name = "message_id"),
+            inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    private Set<UserEntity> deletedForUsers = new HashSet<>();
+
 }
