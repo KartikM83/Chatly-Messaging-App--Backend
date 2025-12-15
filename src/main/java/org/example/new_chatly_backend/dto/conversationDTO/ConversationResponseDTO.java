@@ -19,6 +19,7 @@ public class ConversationResponseDTO {
     private String groupName;
     private String adminId;
     private Instant createdAt;
+    private String lastMessageType;
     private String lastMessage;
     private Instant lastMessageAt;
     private long unreadCount;

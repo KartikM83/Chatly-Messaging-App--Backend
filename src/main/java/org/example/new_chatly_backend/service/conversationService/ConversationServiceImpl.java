@@ -3,10 +3,7 @@ package org.example.new_chatly_backend.service.conversationService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.apache.catalina.User;
-import org.example.new_chatly_backend.dto.conversationDTO.ArchivedResponseDTO;
-import org.example.new_chatly_backend.dto.conversationDTO.ConversationResponseDTO;
-import org.example.new_chatly_backend.dto.conversationDTO.CreateConversationRequest;
-import org.example.new_chatly_backend.dto.conversationDTO.ParticipantResponseDTO;
+import org.example.new_chatly_backend.dto.conversationDTO.*;
 import org.example.new_chatly_backend.entity.conversationEntity.ConversationEntity;
 import org.example.new_chatly_backend.entity.conversationEntity.ConversationParticipantEntity;
 import org.example.new_chatly_backend.entity.conversationEntity.ConversationType;
@@ -317,6 +314,41 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public PinnedResponseDTO pinConversation(String conversationId, HttpServletRequest servletRequest) {
+        String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
+
+        UserEntity currentUser = userRepo.findById(currentUserId).orElseThrow(()->new UserNotFoundException("Current user not found"));
+        ConversationParticipantEntity participant = participantRepository.findByConversation_IdAndUser_Id(conversationId, currentUserId)
+                .orElseThrow(() -> new RuntimeException("Access denied: You are not part of this conversation"));
+        participant.setPinned(true);
+        participantRepository.save(participant);
+
+        return PinnedResponseDTO.builder()
+                .conversationId(conversationId)
+                .pinned(participant.isPinned())
+                .build();
+
+
+
+    }
+
+    @Override
+    public PinnedResponseDTO unpinConversation(String conversationId, HttpServletRequest servletRequest) {
+        String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
+
+        UserEntity currentUser = userRepo.findById(currentUserId).orElseThrow(()->new UserNotFoundException("Current user not found"));
+        ConversationParticipantEntity participant = participantRepository.findByConversation_IdAndUser_Id(conversationId, currentUserId)
+                .orElseThrow(() -> new RuntimeException("Access denied: You are not part of this conversation"));
+        participant.setPinned(false);
+        participantRepository.save(participant);
+
+        return PinnedResponseDTO.builder()
+                .conversationId(conversationId)
+                .pinned(participant.isPinned())
+                .build();
+    }
+
+    @Override
     public String deleteConversation(String conversationId, HttpServletRequest servletRequest) {
         String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
         UserEntity currentUser = userRepo.findById(currentUserId)
@@ -397,12 +429,140 @@ public class ConversationServiceImpl implements ConversationService {
         return mapToConversationResponseDTO(conversation,currentUserId);
     }
 
+    @Override
+    public String leaveGroup(String conversationId, HttpServletRequest servletRequest) {
+        String currentUserId = JwtUtil.extractUserIdFromRequest(servletRequest);
+
+        ConversationEntity conversation = conversationRepo.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+
+        if (!ConversationType.GROUP.equals(conversation.getType())) {
+            throw new RuntimeException("Only groups can be left");
+        }
+
+        // ✅ check user is participant
+        ConversationParticipantEntity participant = participantRepository
+                .findByConversation_IdAndUser_Id(conversationId, currentUserId)
+                .orElseThrow(() -> new RuntimeException("You are not part of this conversation"));
+
+        // ⚠️ If current user is admin, handle admin change
+        if (conversation.getAdmin() != null &&
+                conversation.getAdmin().equals(currentUserId)) {
+
+            // koi dusra member choose karo admin ke liye
+            Optional<ConversationParticipantEntity> newAdminOpt = conversation.getParticipants().stream()
+                    .filter(cp -> !cp.getUser().getId().equals(currentUserId))
+                    .findFirst();
+
+            if (newAdminOpt.isPresent()) {
+                conversation.setAdmin(newAdminOpt.get().getUser().getId());
+                conversationRepo.save(conversation);
+            } else {
+                // koi aur participant hi nahi -> group empty ho jayega
+                // to pura conversation hi delete kar sakte ho
+                conversationRepo.delete(conversation);
+                return "Group deleted because no members left";
+            }
+        }
+
+        // ✅ remove participant from group
+        conversation.getParticipants().remove(participant);
+        participantRepository.delete(participant);
+
+        // optional: agar last user bhi remove ho gaya to group delete
+        if (conversation.getParticipants().isEmpty()) {
+            conversationRepo.delete(conversation);
+            return "Left group and group deleted (no members left)";
+        }
+
+        // optional: websocket event bhejna (baaki members ko notify karne ke liye)
+        // conversationService.broadcastConversationToParticipants(conversation);
+
+        return "Left group successfully";
+    }
 
 
+    public long getUnreadCountForUser(String conversationId, String userId) {
+        ConversationEntity conversation = conversationRepo.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+
+        ConversationParticipantEntity participant = conversation.getParticipants().stream()
+                .filter(p -> p.getUser().getId().equals(userId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("User not part of conversation"));
+
+        Instant deletedAt = participant.getDeletedAt();
+
+        // Count unread messages:
+        // 1. NOT sent by this user
+        // 2. NOT read by this user
+        // 3. Created AFTER deletedAt (if exists)
+
+        if (deletedAt != null) {
+            // Only count messages after last deletion
+            return messageRepo.countUnreadMessagesAfterTimestamp(
+                    conversationId,
+                    userId,
+                    deletedAt
+            );
+        } else {
+            // Count all unread messages
+            return messageRepo.countUnreadMessages(conversationId, userId);
+        }
+    }
 
 
-
-
+//    private ConversationResponseDTO mapToConversationResponseDTO(ConversationEntity conversation,
+//                                                                 String currentUserId) {
+//
+//        List<ParticipantResponseDTO> participantDTOs = conversation.getParticipants()
+//                .stream()
+//                .map(cp -> ParticipantResponseDTO.builder()
+//                        .id(cp.getUser().getId())
+//                        .name(cp.getUser().getName())
+//                        .profileImage(cp.getUser().getProfileImage())
+//                        .phoneNumber(cp.getUser().getPhoneNumber())
+//                        .build())
+//                .toList();
+//
+//        // find THIS user's participant row
+//        Optional<ConversationParticipantEntity> meOpt = conversation.getParticipants()
+//                .stream()
+//                .filter(cp -> cp.getUser().getId().equals(currentUserId))
+//                .findFirst();
+//
+//        boolean archivedForMe = meOpt.map(ConversationParticipantEntity::isArchived).orElse(false);
+//        boolean pinnedForMe   = meOpt.map(ConversationParticipantEntity::isPinned).orElse(false);
+//        long unreadCount = messageRepo.countUnreadMessages(conversation.getId(), currentUserId);
+//
+//        // 🔹 last message
+//        List<MessageEntity> lastMessages = messageRepo
+//                .findTopByConversationIdOrderByCreatedAtDesc(
+//                        conversation.getId(),
+//                        org.springframework.data.domain.PageRequest.of(0, 1)
+//                );
+//
+//
+//        Optional<MessageEntity> lastMessageOpt =
+//                lastMessages.isEmpty() ? Optional.empty() : Optional.of(lastMessages.get(0));
+//
+//        return ConversationResponseDTO.builder()
+//                .id(conversation.getId())
+//                .type(conversation.getType())
+//                .groupName(conversation.getName())
+//                .participants(participantDTOs)
+//                .adminId(conversation.getAdmin())
+//                .groupProfileImage(conversation.getProfileImage())
+//                .createdAt(conversation.getCreatedAt())
+//                .archived(archivedForMe)   // 👈 per user
+//                .pinned(pinnedForMe)
+//                .lastMessage(lastMessageOpt.map(MessageEntity::getContent).orElse(null))
+//                .lastMessageType(lastMessageOpt.map(m -> m.getType().name()).orElse(null))
+//                .lastMessageAt(lastMessageOpt.map(MessageEntity::getCreatedAt).orElse(null))
+//                .unreadCount(unreadCount)
+//                .typing(false)             // or null; typing should be via websocket
+//                .build();
+//    }
 
 
     private ConversationResponseDTO mapToConversationResponseDTO(ConversationEntity conversation,
@@ -414,6 +574,7 @@ public class ConversationServiceImpl implements ConversationService {
                         .id(cp.getUser().getId())
                         .name(cp.getUser().getName())
                         .profileImage(cp.getUser().getProfileImage())
+                        .phoneNumber(cp.getUser().getPhoneNumber())
                         .build())
                 .toList();
 
@@ -425,7 +586,9 @@ public class ConversationServiceImpl implements ConversationService {
 
         boolean archivedForMe = meOpt.map(ConversationParticipantEntity::isArchived).orElse(false);
         boolean pinnedForMe   = meOpt.map(ConversationParticipantEntity::isPinned).orElse(false);
-        long unreadCount = messageRepo.countUnreadMessages(conversation.getId(), currentUserId);
+
+        // ✅ UPDATED: Use the new method that respects deletedAt
+        long unreadCount = getUnreadCountForUser(conversation.getId(), currentUserId);
 
         // 🔹 last message
         List<MessageEntity> lastMessages = messageRepo
@@ -445,15 +608,15 @@ public class ConversationServiceImpl implements ConversationService {
                 .adminId(conversation.getAdmin())
                 .groupProfileImage(conversation.getProfileImage())
                 .createdAt(conversation.getCreatedAt())
-                .archived(archivedForMe)   // 👈 per user
+                .archived(archivedForMe)
                 .pinned(pinnedForMe)
                 .lastMessage(lastMessageOpt.map(MessageEntity::getContent).orElse(null))
+                .lastMessageType(lastMessageOpt.map(m -> m.getType().name()).orElse(null))
                 .lastMessageAt(lastMessageOpt.map(MessageEntity::getCreatedAt).orElse(null))
-                .unreadCount(unreadCount)
-                .typing(false)             // or null; typing should be via websocket
+                .unreadCount((int) unreadCount)  // ✅ Now uses corrected calculation
+                .typing(false)
                 .build();
     }
-
 
     public void broadcastConversationToParticipants(ConversationEntity conversation) {
 
@@ -467,6 +630,8 @@ public class ConversationServiceImpl implements ConversationService {
             messagingTemplate.convertAndSend(destination, dto);
         });
     }
+
+
 
 
 }

@@ -14,7 +14,7 @@ public interface MessageService {
 
     MessageEditResponseDTO editMessage(String conversationId, String messageId, MessageEditRequestDTO request, Principal principal);
 
-    Object deleteMessage(String conversationId, String messageId, Principal principal);
+    Object deleteMessage(String conversationId, String messageId, String scope,Principal principal);
 
     Object reactToMessage(String conversationId, String messageId, String reaction, Principal principal);
 

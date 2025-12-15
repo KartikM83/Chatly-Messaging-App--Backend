@@ -57,4 +57,38 @@ WHERE m.conversation.id = :conversationId
 """)
     List<MessageEntity> findPendingForUser(@Param("userId") String userId);
 
+
+    @Query(
+            value = "SELECT COUNT(DISTINCT md.user_id) " +
+                    "FROM message_deliveries md " +
+                    "WHERE md.message_id = :messageId",
+            nativeQuery = true
+    )
+    long countDeliveredReceivers(@Param("messageId") String messageId);
+
+    @Query(
+            value = "SELECT COUNT(DISTINCT mr.user_id) " +
+                    "FROM message_reads mr " +
+                    "WHERE mr.message_id = :messageId",
+            nativeQuery = true
+    )
+    long countReadReceivers(@Param("messageId") String messageId);
+
+
+    @Query("""
+    SELECT COUNT(m) FROM MessageEntity m
+    WHERE m.conversation.id = :conversationId
+    AND m.sender.id != :userId
+    AND NOT EXISTS (
+        SELECT 1 FROM m.readBy r WHERE r.id = :userId
+    )
+    AND (m.deleted = false OR m.deleted IS NULL)
+    AND m.createdAt > :afterTimestamp
+    """)
+    long countUnreadMessagesAfterTimestamp(
+            @Param("conversationId") String conversationId,
+            @Param("userId") String userId,
+            @Param("afterTimestamp") Instant afterTimestamp
+    );
+
 }
