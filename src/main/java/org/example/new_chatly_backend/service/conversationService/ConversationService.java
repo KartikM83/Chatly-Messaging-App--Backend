@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.example.new_chatly_backend.dto.conversationDTO.ArchivedResponseDTO;
 import org.example.new_chatly_backend.dto.conversationDTO.ConversationResponseDTO;
 import org.example.new_chatly_backend.dto.conversationDTO.CreateConversationRequest;
+import org.example.new_chatly_backend.dto.conversationDTO.PinnedResponseDTO;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -24,4 +25,10 @@ public interface ConversationService {
 
 
     ConversationResponseDTO updateConversation(CreateConversationRequest request, MultipartFile file, HttpServletRequest servletRequest, String conversationId);
+
+    String leaveGroup(String conversationId, HttpServletRequest servletRequest);
+
+    PinnedResponseDTO pinConversation(String conversationId, HttpServletRequest servletRequest);
+
+    PinnedResponseDTO unpinConversation(String conversationId, HttpServletRequest servletRequest);
 }

@@ -106,6 +106,11 @@ public class AuthController {
         // Option 2: Optional: store invalidated access tokens in Redis (for blacklist)
         // redisTemplate.opsForValue().set("blacklist:" + accessToken, "true", 1, TimeUnit.HOURS);
 
-        return ResponseEntity.ok(Map.of("status", "ok"));
+        return ResponseEntity.ok(
+                Map.of(
+                        "status", "ok",
+                        "message", "Logged out successfully"
+                )
+        );
     }
 }

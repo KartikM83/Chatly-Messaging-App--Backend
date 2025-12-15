@@ -27,16 +27,20 @@ public class OtpRequestServiceImpl implements OtpRequestService {
     private final UserRepository userRepo;
 
 
-    @Override
     public OtpRequestDTO sendOtp(OtpRequestDTO request) {
 
         String otp = String.format("%04d", random.nextInt(10000));
         String key = "otp:" + request.getPhoneNumber();
-        redisTemplate.opsForValue().set(key, otp, Duration.ofMinutes(3));
-        System.out.println("Your Otp" + otp);
-        request.setOtp(otp);
-        return request;
 
+        try {
+            redisTemplate.opsForValue().set(key, otp, Duration.ofMinutes(3));
+            System.out.println("Your Otp " + otp);
+            request.setOtp(otp);
+            return request;
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw e;
+        }
     }
 
 
