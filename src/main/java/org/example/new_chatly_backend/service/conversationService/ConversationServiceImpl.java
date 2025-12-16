@@ -17,6 +17,7 @@ import org.example.new_chatly_backend.repository.MessageRepository;
 import org.example.new_chatly_backend.repository.UserRepository;
 import org.example.new_chatly_backend.utility.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -591,14 +592,36 @@ public class ConversationServiceImpl implements ConversationService {
         long unreadCount = getUnreadCountForUser(conversation.getId(), currentUserId);
 
         // 🔹 last message
-        List<MessageEntity> lastMessages = messageRepo
-                .findTopByConversationIdOrderByCreatedAtDesc(
+//        List<MessageEntity> lastMessages = messageRepo
+//                .findTopByConversationIdOrderByCreatedAtDesc(
+//                        conversation.getId(),
+//                        org.springframework.data.domain.PageRequest.of(0, 1)
+//                );
+//
+//        Optional<MessageEntity> lastMessageOpt =
+//                lastMessages.isEmpty() ? Optional.empty() : Optional.of(lastMessages.get(0));
+
+//        Instant deletedAt = meOpt.map(ConversationParticipantEntity::getDeletedAt)
+//                .orElse(null);
+//
+//        List<MessageEntity> lastMessages =
+//                messageRepo.findLastVisibleMessage(
+//                        conversation.getId(),
+//                        deletedAt,
+//                        PageRequest.of(0, 1)
+//                );
+        List<MessageEntity> lastMessages =
+                messageRepo.findLastVisibleForUser(
                         conversation.getId(),
-                        org.springframework.data.domain.PageRequest.of(0, 1)
+                        currentUserId,
+                        PageRequest.of(0, 1)
                 );
 
         Optional<MessageEntity> lastMessageOpt =
-                lastMessages.isEmpty() ? Optional.empty() : Optional.of(lastMessages.get(0));
+                lastMessages.isEmpty()
+                        ? Optional.empty()
+                        : Optional.of(lastMessages.get(0));
+
 
         return ConversationResponseDTO.builder()
                 .id(conversation.getId())
@@ -610,9 +633,10 @@ public class ConversationServiceImpl implements ConversationService {
                 .createdAt(conversation.getCreatedAt())
                 .archived(archivedForMe)
                 .pinned(pinnedForMe)
-                .lastMessage(lastMessageOpt.map(MessageEntity::getContent).orElse(null))
-                .lastMessageType(lastMessageOpt.map(m -> m.getType().name()).orElse(null))
+                .lastMessage(lastMessageOpt.map(MessageEntity::getContent).orElse(""))
+                .lastMessageType(lastMessageOpt.map(m -> m.getType().name()).orElse("TEXT"))
                 .lastMessageAt(lastMessageOpt.map(MessageEntity::getCreatedAt).orElse(null))
+                .lastMessageId(lastMessageOpt.map(MessageEntity::getId).orElse(null))
                 .unreadCount((int) unreadCount)  // ✅ Now uses corrected calculation
                 .typing(false)
                 .build();
