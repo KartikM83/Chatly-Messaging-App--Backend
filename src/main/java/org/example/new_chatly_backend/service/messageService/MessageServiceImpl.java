@@ -13,6 +13,7 @@
     import org.example.new_chatly_backend.repository.*;
     import org.example.new_chatly_backend.service.conversationService.ConversationServiceImpl;
     import org.example.new_chatly_backend.service.conversationService.FileStorageService;
+    import org.springframework.data.domain.PageRequest;
     import org.springframework.messaging.simp.SimpMessagingTemplate;
     import org.springframework.stereotype.Service;
     import org.springframework.web.multipart.MultipartFile;
@@ -392,16 +393,47 @@
             // 1) DELETE FOR ME
             // -----------------------
             if ("ME".equalsIgnoreCase(scope)) {
-                // Just hide for this user
+
                 message.getDeletedForUsers().add(user);
                 messageRepository.save(message);
 
-                response.put("messageId", message.getId());
-                response.put("scope", "ME");
+                // 🔥 find last visible message FOR THIS USER
 
-                // ❌ NO WebSocket broadcast – only this user should hide message
-                return response;
+                List<MessageEntity> list =
+                        messageRepository.findLastVisibleForUser(
+                                conversationId,
+                                user.getId(),
+                                PageRequest.of(0, 1) // 🔥 LIMIT 1
+                        );
+
+                MessageEntity lastVisible =
+                        list.isEmpty() ? null : list.get(0);
+
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("event", "MESSAGE_DELETE");
+                payload.put("conversationId", conversationId);
+
+                Map<String, Object> data = new HashMap<>();
+                data.put("scope", "ME");
+                data.put("userId", user.getId());
+                data.put("hasLastMessage", lastVisible != null);
+                data.put("lastMessage",
+                        lastVisible != null ? lastVisible.getContent() : "");
+                data.put("lastMessageAt",
+                        lastVisible != null ? lastVisible.getCreatedAt() : Instant.now());
+
+                payload.put("data", data);
+
+                // ✅ SEND ONLY TO THIS USER
+                messagingTemplate.convertAndSend(
+                        "/topic/conversations/" + conversationId,
+                        payload
+                );
+
+
+                return data;
             }
+
 
             // -----------------------
             // 2) DELETE FOR EVERYONE

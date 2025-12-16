@@ -22,11 +22,13 @@ public class ConversationResponseDTO {
     private String lastMessageType;
     private String lastMessage;
     private Instant lastMessageAt;
+    private String lastMessageId;
     private long unreadCount;
     private String groupProfileImage;
     private Boolean pinned;
     private Boolean typing;
     private Boolean archived;
+
 
 
 }

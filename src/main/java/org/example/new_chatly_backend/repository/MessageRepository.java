@@ -1,6 +1,7 @@
 package org.example.new_chatly_backend.repository;
 
 import org.example.new_chatly_backend.entity.messageEntity.MessageEntity;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -90,5 +91,29 @@ WHERE m.conversation.id = :conversationId
             @Param("userId") String userId,
             @Param("afterTimestamp") Instant afterTimestamp
     );
+
+    @Query("""
+SELECT m FROM MessageEntity m
+WHERE m.conversation.id = :conversationId
+AND (
+     m.deleted = false
+     OR m.content = 'This message was deleted'
+)
+AND m.id NOT IN (
+    SELECT mf.id FROM MessageEntity mf
+    JOIN mf.deletedForUsers u
+    WHERE u.id = :userId
+)
+ORDER BY m.createdAt DESC
+""")
+    List<MessageEntity> findLastVisibleForUser(
+            @Param("conversationId") String conversationId,
+            @Param("userId") String userId,
+            Pageable pageable
+    );
+
+
+
+
 
 }
